@@ -4,5 +4,5 @@ __pycache__
 *.pyc
 *.pth
 work_dir*
-run*
+run*.sh
 /*.py
