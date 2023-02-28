@@ -1,0 +1,3 @@
+git+https://github.com/cocodataset/panopticapi.git@master#egg=panopticapi
+timm
+scikit-learn

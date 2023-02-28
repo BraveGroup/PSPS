@@ -20,8 +20,8 @@ from mmdet.models.utils.builder import TRANSFORMER
 from mmcv.cnn.bricks.registry import ATTENTION
 from torch import einsum
 
-from einops import rearrange, repeat
-from einops.layers.torch import Rearrange
+# from einops import rearrange, repeat
+# from einops.layers.torch import Rearrange
 
 # Copy-paste from defromable detr in mmdet.
 @TRANSFORMER.register_module()

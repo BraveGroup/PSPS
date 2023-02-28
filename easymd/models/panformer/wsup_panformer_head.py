@@ -25,8 +25,8 @@ import pickle
 
 from pydijkstra import dijkstra2d, dijkstra_image
 
-import alphashape
-from descartes import PolygonPatch
+#import alphashape
+#from descartes import PolygonPatch
 
 _USE_CENTER = False
 _USE_IMPLICIT_CENTER = False
