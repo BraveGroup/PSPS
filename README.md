@@ -1,8 +1,7 @@
 ## Pointly-Supervised Panoptic Segmentation (ECCV 2022 Oral)
 
----
 
-Panoptic segmentation with a single point label per target!
+Panoptic segmentation with a single point label per target! [[paper](https://arxiv.org/abs/2210.13950)]
 
 Here are all the codes to reproduce the results. We are still cleaning them and will update later.
 
