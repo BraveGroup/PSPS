@@ -34,28 +34,29 @@ Note that the `panopticapi` has risk of memory leakage, as been discussed in thi
     2. Download the point labels [here](https://drive.google.com/drive/folders/19qBN_da_icbXvMFjlFtz4y24CN2MAvXB?usp=sharing).
     3. Organize the dataset by the following structure:
         ```
-        - PSPS/data/voc
-            - JPEGImages
-                20xx_xxxxxx.jpg
-                ...
-
-            - Panoptic        
-                voc_panoptic_train_aug.json
-                voc_panoptic_val.json
-                - voc_panoptic_train_aug_1pnt_uniform
-                    20xx_xxxxxx.png
-                    ...
-
-                - voc_panoptic_val
-                    20xx_xxxxxx.png
-                    ...
+        PSPS/data/voc
+        ├── JPEGImages
+        │   ├── 20xx_xxxxxx.jpg
+        │   └──     ...
+        │
+        └── Panoptic        
+            ├── voc_panoptic_train_aug.json
+            ├── voc_panoptic_val.json
+            │
+            ├── voc_panoptic_train_aug_1pnt_uniform
+            │   ├── 20xx_xxxxxx.png
+            │   └──     ...
+            │
+            └── voc_panoptic_val
+                ├── 20xx_xxxxxx.png
+                └──     ...
         ``` 
 
 - MS COCO
 
     ...
 
-### Train & Test
+## Train & Test
 
 Please find the `example_run.sh` for details. 
 

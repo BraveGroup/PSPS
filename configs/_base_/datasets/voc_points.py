@@ -36,17 +36,13 @@ test_pipeline = [
         ])
 ]
 data = dict(
-    samples_per_gpu=1,
+    samples_per_gpu=2,
     workers_per_gpu=2,
     train=dict(
         type=dataset_type,
         ann_file=data_root + 'Panoptic/voc_panoptic_train_aug.json',
         img_prefix=data_root + 'JPEGImages/',
         seg_prefix=data_root + 'Panoptic/voc_panoptic_train_aug_1pnt_uniform/',
-        #seg_prefix=data_root + 'Panoptic/voc_panoptic_train_aug/',
-        #ann_file=data_root + 'Panoptic/voc_panoptic_val.json',
-        #img_prefix=data_root + 'JPEGImages/',
-        #seg_prefix=data_root + 'Panoptic/voc_panoptic_val/',
         pipeline=train_pipeline),
     val=dict(
         type=dataset_type,

@@ -1,6 +1,7 @@
+# previously named 'coco_wsup.py'
 
 _base_ = [
-    '../_base_/datasets/voc_points.py',
+    '../_base_/datasets/coco_points.py',
     '../_base_/default_runtime.py'
 ]
 _dim_ = 256
@@ -8,6 +9,7 @@ _dim_half_ = _dim_//2
 _feed_ratio_ = 4
 _feed_dim_ = _feed_ratio_*_dim_
 _num_levels_ = 4
+
 model = dict(
     type='PanSeg',
     pretrained='torchvision://resnet50',
@@ -30,15 +32,15 @@ model = dict(
         num_outs=_num_levels_),
     bbox_head=dict(
         type='WsupPanformerHead',
+        lambda_color_prior=3,
         lambda_diff_prob=1,
         lambda_diff_bond=0.1,
         lambda_diff_feat=0.1,
-        lambda_color_prior=3,
         expand_size=17,
         num_query=300,
-        num_classes=21,  # 80+53
-        num_things_classes=20,
-        num_stuff_classes=1,
+        num_classes=133,  # 80+53
+        num_things_classes=80,
+        num_stuff_classes=53,
         in_channels=2048,
         sync_cls_avg_factor=True,
         as_two_stage=False,
@@ -117,81 +119,8 @@ model = dict(
         sampler_with_mask =dict(type='PseudoSampler_segformer'),    
         ),
     test_cfg=dict(max_per_img=100))
-img_norm_cfg = dict(
-    mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True)
-# train_pipeline, NOTE the img_scale and the Pad's size_divisor is different
-# from the default setting in mmdet.
-train_pipeline = [
-    dict(type='LoadImageFromFile'),
-    dict(type='LoadAnnotations', with_bbox=True,with_mask=True),
-    dict(type='RandomFlip', flip_ratio=0.5),
-    dict(
-        type='AutoAugment',
-        policies=[
-            [
-                dict(
-                    type='Resize',
-                    img_scale=[(320, 1333), (360, 1333),
-                               (420, 1333), (480, 1333),
-                               (512, 1333), (544, 1333), (576, 1333),
-                               (600, 1333)],
-                    multiscale_mode='value',
-                    keep_ratio=True)
-            ],
-            [
-                dict(
-                    type='Resize',
-                    # The radio of all image in train dataset < 7
-                    # follow the original impl
-                    img_scale=[(400, 4200), (500, 4200), (600, 4200)],
-                    multiscale_mode='value',
-                    keep_ratio=True),
-                dict(
-                    type='RandomCrop',
-                    crop_type='absolute_range',
-                    crop_size=(384, 600),
-                    allow_negative_crop=True),
-                dict(
-                    type='Resize',
-                    img_scale=[(320, 1333), (360, 1333),
-                               (420, 1333), (480, 1333),
-                               (512, 1333), (544, 1333), (576, 1333),
-                               (600, 1333)],
-                    multiscale_mode='value',
-                    override=True,
-                    keep_ratio=True)
-            ]
-        ]),
-    dict(type='Normalize', **img_norm_cfg),
-    dict(type='Pad', size_divisor=1),
-    #dict(type='SegRescale', scale_factor=1 / 4),
-    dict(type='DefaultFormatBundle'),
-    dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels', 'gt_masks'])
-]
-# test_pipeline, NOTE the Pad's size_divisor is different from the default
-# setting (size_divisor=32). While there is little effect on the performance
-# whether we use the default setting or use size_divisor=1.
-test_pipeline = [
-    dict(type='LoadImageFromFile'),
-    dict(
-        type='MultiScaleFlipAug',
-        img_scale=(1333, 600),
-        flip=False,
-        transforms=[
-            dict(type='Resize', keep_ratio=True),
-            dict(type='RandomFlip'),
-            dict(type='Normalize', **img_norm_cfg),
-            dict(type='Pad', size_divisor=1),
-            dict(type='ImageToTensor', keys=['img']),
-            dict(type='Collect', keys=['img'])
-        ])
-]
-data = dict(
-    samples_per_gpu=2,
-    workers_per_gpu=2,)
-#    train=dict(filter_empty_gt=False, pipeline=train_pipeline),
-#    val=dict(pipeline=test_pipeline),
-#    test=dict(pipeline=test_pipeline))
+
+
 # optimizer
 optimizer = dict(
     type='AdamW',
@@ -205,13 +134,12 @@ optimizer = dict(
             'reference_points': dict(lr_mult=0.1)
         }))
 optimizer_config = dict(grad_clip=dict(max_norm=0.1, norm_type=2))
-# learning policy
-lr_config = dict(policy='step', step=[18])
-runner = dict(type='EpochBasedRunner', max_epochs=24)
-#custom_hooks = [dict(type='CacheCleaner', priority='HIGHEST')]  # [dict(type='GradChecker',priority='HIGHEST')]
-custom_hooks = [dict(type='VisualizationHook', priority='LOWEST', interval=50)]
+
+lr_config = dict(policy='step', step=[8])
+runner = dict(type='EpochBasedRunner', max_epochs=12)
+
+custom_hooks = [dict(type='VisualizationHook', priority='LOWEST', interval=300)]
 custom_imports = dict(
-    #imports=["custom_modules", "easymd", ],
     imports=["datasets", "easymd", "models"],
     allow_failed_imports=False)
 

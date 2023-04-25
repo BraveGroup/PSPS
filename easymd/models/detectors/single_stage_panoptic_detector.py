@@ -6,9 +6,9 @@ from mmdet.core import bbox2result
 from mmdet.models.detectors.base import BaseDetector
 from mmdet.models.detectors.single_stage import SingleStageDetector
 from mmdet.models.builder import DETECTORS, build_backbone, build_head, build_neck
-#from .base import BaseDetector
 import mmcv
 from torch.utils.checkpoint import checkpoint
+
 @DETECTORS.register_module()
 class SingleStagePanopticDetector(BaseDetector):
     """Base class for single-stage detectors.
@@ -40,6 +40,7 @@ class SingleStagePanopticDetector(BaseDetector):
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
         self.with_checkpoint = with_checkpoint
+
     def extract_feat(self, img):
         """Directly extract features from the backbone+neck."""
         x = self.backbone(img)
@@ -55,6 +56,7 @@ class SingleStagePanopticDetector(BaseDetector):
         x = self.extract_feat(img)
         outs = self.bbox_head(x)
         return outs
+
     @auto_fp16(apply_to=('img',))
     def forward_train(self,
                       img,
@@ -83,10 +85,6 @@ class SingleStagePanopticDetector(BaseDetector):
         Returns:
             dict[str, Tensor]: A dictionary of loss components.
         """
-      
-
-        #mmcv.imshow(gt_semantic_seg.squeeze(0).squeeze(0).cpu().numpy())
-        #mmcv.imshow(img.squeeze(0).permute(1,2,0).cpu().numpy())
         
         batch_input_shape = tuple(img[0].size()[-2:])
         for img_meta in img_metas:
@@ -95,8 +93,6 @@ class SingleStagePanopticDetector(BaseDetector):
                 'img': img,
                 'img_metas': img_metas }
 
-        #img_metas[0]['img'] = img
-        #super(SingleStagePanopticDetector, self).forward_train(img, img_metas)
         if self.with_checkpoint:
             img.requires_grad_(True)
             x = checkpoint(self.extract_feat,img)
@@ -116,16 +112,6 @@ class SingleStagePanopticDetector(BaseDetector):
         gt_masks = new_gt_masks
 
         if gt_semantic_seg is not None:
-            #if isinstance(gt_semantic_seg,  list):
-            #    print(len(gt_semantic_seg), [x.shape for x in gt_semantic_seg])
-            #else:
-            #    print(type(gt_semantic_seg), gt_semantic_seg.shape, img.shape)
-            #_seg = img.new_full((len(gt_semantic_seg), *batch_input_shape), 255).long()
-            #for i, seg in enumerate(gt_semantic_seg):
-            #    #print(seg.shape, _seg.shape, torch.unique(seg))
-            #    seg = seg.squeeze(0)
-            #    _seg[i, :seg.shape[0], :seg.shape[1]] = seg
-            #gt_semantic_seg = _seg
             assert gt_semantic_seg.shape[-2:] == img.shape[-2:], (gt_semantic_seg.shape, img.shape)
             gt_semantic_seg = gt_semantic_seg.squeeze(1)
             gt_semantic_new = torch.full_like(gt_semantic_seg, 255)
@@ -154,8 +140,6 @@ class SingleStagePanopticDetector(BaseDetector):
         """
      
         x = self.extract_feat(img)
-        #print('checkpoint')
-        #
         outs = self.bbox_head(x)
         # get origin input shape to support onnx dynamic shape
         if torch.onnx.is_in_onnx_export():
@@ -176,7 +160,6 @@ class SingleStagePanopticDetector(BaseDetector):
             for det_bboxes, det_labels in bbox_list
         ]
         return list(zip(bbox_results, seg_list))
-        #return bbox_results
 
     def aug_test(self, imgs, img_metas, rescale=False):
         """Test function with test time augmentation.

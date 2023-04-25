@@ -154,7 +154,8 @@ try:
     from detectron2.structures import BitMasks, Boxes, BoxMode, Keypoints, PolygonMasks, RotatedBoxes
     from detectron2.utils.file_io import PathManager
 except:
-    print('no detectron2')
+    pass
+    # print('no detectron2')
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 

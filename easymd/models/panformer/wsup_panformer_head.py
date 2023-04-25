@@ -25,59 +25,20 @@ import pickle
 
 from pydijkstra import dijkstra2d, dijkstra_image
 
-#import alphashape
-#from descartes import PolygonPatch
 
-_USE_CENTER = False
-_USE_IMPLICIT_CENTER = False
-_USE_FEATURE_EMBEDS = True
 _COLLECT_INTERS = False
 _INTERS_FOLDER = '/home/junsong_fan/Panformer/analysis_feats/inters'
 if _COLLECT_INTERS:
     os.makedirs(_INTERS_FOLDER, exist_ok=True)
 
-_USE_BOUNDARY = False
-DIJKSTRA = True
 #WARMUP_ITER = 1324 * 5
 WARMUP_ITER = 14659  # used in coco
 #WARMUP_ITER = 662 # used in voc
 
-
-#EXPAND_SIZE = 21
-#EXPAND_SIZE = 17
-COLOR_PRIOR_LOSS = True
+# COLOR_PRIOR_LOSS = True
 
 VISUALIZATION_ONLY = False
 
-ALPHA_SHAPE = False
-
-def get_alpha_shape(H, W, points):
-    #assert isinstance(points, np.ndarray), type(points)
-    N = len(points)
-    out = np.zeros((N, H, W), np.uint8)
-    #points = points.astype(np.int32)
-    for i, pnts in enumerate(points):
-        #assert pnts.ndim == 2, points.shape
-        assert pnts.ndim == 2, (pnts.ndim, len(points))
-        pnts = pnts.astype(np.int64)
-        try:
-            alpha_shape = alphashape.alphashape(pnts, 0)
-            verts = PolygonPatch(alpha_shape).get_verts()
-            verts = verts.reshape(-1, 1, 2).astype(np.int32)[..., ::-1].copy()
-            cv2.fillPoly(out[i], [verts], color=1)
-        except:
-            pass
-        #try:
-        #    alpha_shape = alphashape.alphashape(pnts)
-        #except:
-        #    alpha_shape = alphashape.alphashape(pnts, 0)
-        #try:
-        #    verts = PolygonPatch(alpha_shape).get_verts()
-        #    verts = verts.reshape(-1, 1, 2).astype(np.int32)[..., ::-1].copy()
-        #    cv2.fillPoly(out[i], [verts], color=1)
-        #except:
-        #    pass
-    return out
 
 def _get_rgb_image(image, mean=(123.675, 116.28, 103.53), std=(58.395, 57.12, 57.375)):
     if isinstance(image, np.ndarray) and image.dtype == np.uint8:
@@ -270,8 +231,7 @@ class WsupPanformerHead(DETRHeadv2):
                                   weight=5.0,
                                   box_format='xywh'),
                     iou_cost=dict(type='IoUCost', iou_mode='giou', weight=2.0),
-                    max_pos=
-                    3  # Depends on GPU memory, setting it to 1, model can be trained on 1080Ti
+                    max_pos= 3 # Depends on GPU memory, setting it to 1, model can be trained on 1080Ti
                 ), )
 
         self.loss_mask = build_loss(loss_mask)
@@ -284,14 +244,8 @@ class WsupPanformerHead(DETRHeadv2):
         self.tmp_state = {}
         self.warmup_niter = 0
 
-        if _USE_FEATURE_EMBEDS:
-            self.memory_proj = _MemoryProj(self.embed_dims, 128, 'l2')
-        if _USE_CENTER:
-            self.center_proj = _MemoryProj(self.embed_dims, 2, 'tanh')
-        if _USE_IMPLICIT_CENTER:
-            self.implicit_center_proj = _MemoryProj(self.embed_dims, self.embed_dims, None)
-        if _USE_BOUNDARY:
-            self.boundary_proj = _MemoryProj(self.embed_dims, 1, None)
+        # feature embeds
+        self.memory_proj = _MemoryProj(self.embed_dims, 128, 'l2')
 
     def _init_layers(self):
         """Initialize classification branch and regression branch of head."""
@@ -348,9 +302,6 @@ class WsupPanformerHead(DETRHeadv2):
             for m in self.reg_branches:
                 nn.init.constant_(m[-1].bias.data[2:], 0.0)
 
-        #self.semantic_proj.weight.copy_(torch.eye(self.num_things_classes+self.num_stuff_classes, dtype=torch.float32))
-        num_classes = self.num_things_classes + self.num_stuff_classes
-        #nn.init.eye_(self.semantic_proj.weight.view(num_classes, num_classes))
         nn.init.constant_(self.semantic_proj.weight, 1.0)
         nn.init.constant_(self.semantic_proj.bias, 0.0)
 
@@ -513,10 +464,6 @@ class WsupPanformerHead(DETRHeadv2):
 
         bch_shape = img_metas[0]['batch_input_shape']
 
-        #isthing = [gt_labels < self.num_things_classes for gt_labels in gt_labels_list]
-        #gt_th_labels_list = [data[mask] for data, mask in zip(gt_labels_list, isthing)]
-        #gt_th_bboxes_list = [data[mask] for data, mask in zip(gt_bboxes_list, isthing)]
-        #gt_th_masks_list = [data[mask] for data, mask in zip(gt_masks_list, isthing)]
         gt_bboxes_list = None
 
         loss_dict = {}
@@ -531,60 +478,14 @@ class WsupPanformerHead(DETRHeadv2):
                 gt_bboxes_ignore)
         loss_dict.update(loss_semantic)
 
-        # semantic prediction
-        # all_sem_cls, all_sem_masks_logit = self.forward_semantic(args_tuple)
-        # n_dec, _, h, w = all_sem_masks_logit.shape
+        # feature embeds
+        memory_proj = self.memory_proj(memory, memory_pos, memory_mask, hw_lvl) # [bsz, dim, h, w]
 
-        # intial semantic targets, point-level
-        #sem_target_mask, sem_target_mask_weight, sem_target_cls = self.get_point_semantic_targets(gt_semantics_list)
-        #H, W = sem_target_mask.shape[-2:]
+        center_proj = None
+        boundary_proj = None
 
-        #semantic_info = (
-        #        F.interpolate(all_sem_masks_logit[-1].view(bsz, -1, h, w), (H, W), mode='bilinear', align_corners=False),
-        #        sem_target_mask.view(bsz, -1, H, W),
-        #        sem_target_mask_weight.view(bsz, -1))
-
-        ## initial semantic loss
-        #loss_dict.update(self.loss_sem_cls(all_sem_cls, sem_target_cls, sem_target_mask_weight))
-        #loss_dict.update(self.loss_sem_mask(all_sem_masks_logit, sem_target_mask, sem_target_mask_weight, True))
-        #loss_dict.update(self.loss_sem_color(all_sem_masks_logit))
-
-        # others
-
-        if _USE_FEATURE_EMBEDS:
-            memory_proj = self.memory_proj(memory, memory_pos, memory_mask, hw_lvl) # [bsz, dim, h, w]
-        else:
-            memory_proj = None
-
-        if _USE_CENTER:
-            center_proj = self.center_proj(memory, memory_pos, memory_mask, hw_lvl)
-        else:
-            center_proj = None
-
-        if _USE_IMPLICIT_CENTER:
-            implicit_center_proj = self.implicit_center_proj(memory, memory_pos, memory_mask, hw_lvl)
-            memory_pos2d = memory_pos[:, :hw_lvl[0][0]*hw_lvl[0][1]].view(bsz, *hw_lvl[0], embed_dims)
-            memory_pos2d = memory_pos2d.permute(0, 3, 1, 2).contiguous()
-        else:
-            implicit_center_proj, memory_pos2d = None, None
-
-        if _USE_BOUNDARY:
-            boundary_proj = self.boundary_proj(memory, memory_pos, memory_mask, hw_lvl).squeeze(1)
-        else:
-            boundary_proj = None
-
-        if DIJKSTRA:
-            pl_labels_list, pl_bboxes_list, pl_masks_list, pl_semantics_list = \
-                    self.get_dijkstra_pseudo_label(*semantic_info, gt_labels_list, gt_masks_list, boundary_proj, memory_proj, img_metas)
-        else:
-            pl_labels_list, pl_bboxes_list, pl_masks_list, pl_semantics_list = \
-                self.get_pseudo_gt_from_semantic(*semantic_info, gt_labels_list, gt_masks_list, memory_proj, center_proj, implicit_center_proj, memory_pos2d, img_metas)
-
-        # additional semantic loss
-        #pl_sem_mask = F.one_hot(pl_semantics_list, 256)[..., :self.num_things_classes+self.num_stuff_classes]
-        #pl_sem_mask = pl_sem_mask.permute(0, 3, 1, 2).float()
-        #loss_sem2 = self.loss_sem_mask(all_sem_masks_logit, pl_sem_mask.flatten(0, 1), None, True)
-        #loss_dict.update({f'{k}(2)': v for k, v in loss_sem2.items()})
+        pl_labels_list, pl_bboxes_list, pl_masks_list, pl_semantics_list = \
+                self.get_dijkstra_pseudo_label(*semantic_info, gt_labels_list, gt_masks_list, boundary_proj, memory_proj, img_metas)
 
         # location decoder loss
         for i, (cls_scores, bbox_preds) in enumerate(zip(all_cls_scores, all_bbox_preds)):
@@ -630,22 +531,9 @@ class WsupPanformerHead(DETRHeadv2):
         # feature metric distance loss
         pl_stuff_masks = F.one_hot(pl_semantics_list.long(), 256)[..., self.num_things_classes:self.num_things_classes+self.num_stuff_classes].permute(0, 3, 1, 2).to(pl_masks_list[0])
 
-        if _USE_FEATURE_EMBEDS:
-            loss_cl = self.loss_metric(memory_proj, gt_labels_list, gt_masks_list, gt_semantics_list, pl_masks_list, pl_stuff_masks, img_metas)
-            loss_dict.update(loss_cl)
-
-        # geometric centers
-        if _USE_CENTER:
-            loss_geo = self.loss_geometric(center_proj, pl_masks_list, pl_stuff_masks, img_metas)
-            loss_dict.update(loss_geo)
-
-        if _USE_IMPLICIT_CENTER:
-            loss_impgeo = self.loss_implicit_geometric(implicit_center_proj, memory_pos2d, pl_masks_list, pl_stuff_masks, img_metas)
-            loss_dict.update(loss_impgeo)
-
-        if _USE_BOUNDARY:
-            loss_bond = self.loss_boundary(boundary_proj, pl_masks_list, pl_stuff_masks, img_metas)
-            loss_dict.update(loss_bond)
+        # feature embeds
+        loss_cl = self.loss_metric(memory_proj, gt_labels_list, gt_masks_list, gt_semantics_list, pl_masks_list, pl_stuff_masks, img_metas)
+        loss_dict.update(loss_cl)
 
         # tmp states
         self.tmp_state.update({
@@ -667,7 +555,6 @@ class WsupPanformerHead(DETRHeadv2):
         warmup = max(min(float(self.warmup_niter) / WARMUP_ITER, 1), 0)
         self.warmup_niter += 1
         k_contains = lambda k: any([x in k for x in ['sem', 'loss_cl']])
-        #loss_dict = {k: v * (1 if 'sem' in k else warmup) for k, v in loss_dict.items()}
         loss_dict = {k: v * (1 if k_contains(k) else warmup) for k, v in loss_dict.items()}
 
         if VISUALIZATION_ONLY:
@@ -752,17 +639,6 @@ class WsupPanformerHead(DETRHeadv2):
                     kernel_size=5)
             loss_dict[f'd{i}loss_sem_color'] = loss_color * self.lambda_color_prior
         return loss_dict
-
-    #def loss_sem_crf(self, all_sem_masks_logit):
-    #    loss_dict = {}
-    #    n_dec, bsz_cls, h, w = all_sem_masks_logit.shape
-    #    bsz = bsz_cls // (self.num_things_classes + self.num_stuff_classes)
-    #    assert bsz * (self.num_things_classes + self.num_stuff_classes) == bsz_cls
-    #    images = self.tmp_state['img']
-    #    images = F.interpolate(images, (h, w), mode='bilinear', align_corners=False)
-    #    boundary = image_to_boundary(images)
-    #    boundary = F.max_pool2d(boundary[None], 3, 1, 1)[0]
-    #    boundary = (boundary > 0.1).float()
 
     def get_point_semantic_targets(self, gt_semantics_list):
         target_mask = F.one_hot(gt_semantics_list.long(), 256)
@@ -968,111 +844,106 @@ class WsupPanformerHead(DETRHeadv2):
         self.tmp_state.update(dict(memory_proj=memory_proj))
         return loss_dict
 
-    def loss_geometric(self, center_proj, th_masks_list, st_masks, img_metas):
-        #st_masks = F.one_hot(st_masks.long(), 256)[..., self.num_things_classes:self.num_things_classes+self.num_stuff_classes].permute(0, 3, 1, 2).to(th_masks_list[0]) # [bsz, nStuff, H, W]
+    # def loss_geometric(self, center_proj, th_masks_list, st_masks, img_metas):
+    #     H, W = th_masks_list[0].shape[-2:]
+    #     center_proj = F.interpolate(center_proj, (H, W), mode='bilinear', align_corners=False)
+    #     self.tmp_state.update({'center_proj': center_proj})
 
-        H, W = th_masks_list[0].shape[-2:]
-        center_proj = F.interpolate(center_proj, (H, W), mode='bilinear', align_corners=False)
-        self.tmp_state.update({'center_proj': center_proj})
+    #     # for thing classes, predict their center.
+    #     coords = torch.stack(torch.meshgrid(torch.arange(H), torch.arange(W))).to(center_proj) # [2, H, W]
+    #     coords = coords / coords.max(1, keepdim=True)[0].max(2, keepdim=True)[0]
 
-        # for thing classes, predict their center.
-        coords = torch.stack(torch.meshgrid(torch.arange(H), torch.arange(W))).to(center_proj) # [2, H, W]
-        coords = coords / coords.max(1, keepdim=True)[0].max(2, keepdim=True)[0]
+    #     pred_centers_all = (coords[None] + center_proj).clip(min=0, max=1)
 
-        pred_centers_all = (coords[None] + center_proj).clip(min=0, max=1)
+    #     bsz = len(center_proj)
+    #     loss_centers = []
+    #     for i, th_masks in enumerate(th_masks_list):
+    #         th_masks = th_masks.detach()
 
-        bsz = len(center_proj)
-        loss_centers = []
-        for i, th_masks in enumerate(th_masks_list):
-            th_masks = th_masks.detach()
+    #         areas = th_masks.sum((1, 2))
+    #         centers = (th_masks[:, None] * coords[None]).sum((2, 3)) / areas[:, None].clip(min=1) # [n, 2]
+    #         centers = centers[:, :, None, None].expand(-1, -1, H, W)
+    #         pred_centers = pred_centers_all[i:i+1].expand(len(th_masks), -1, -1, -1) # [n, 2, H, W]
 
-            areas = th_masks.sum((1, 2))
-            centers = (th_masks[:, None] * coords[None]).sum((2, 3)) / areas[:, None].clip(min=1) # [n, 2]
-            centers = centers[:, :, None, None].expand(-1, -1, H, W)
-            pred_centers = pred_centers_all[i:i+1].expand(len(th_masks), -1, -1, -1) # [n, 2, H, W]
+    #         loss_center = F.smooth_l1_loss(pred_centers, centers, reduction='none')
+    #         loss_center = (loss_center * th_masks[:, None]).sum((1, 2, 3)) / (H * W) # [n]
 
-            loss_center = F.smooth_l1_loss(pred_centers, centers, reduction='none')
-            loss_center = (loss_center * th_masks[:, None]).sum((1, 2, 3)) / (H * W) # [n]
+    #         loss_centers.append(loss_center * (areas > 10))
 
-            loss_centers.append(loss_center * (areas > 10))
+    #     loss_centers = torch.cat(loss_centers).mean()
 
-        loss_centers = torch.cat(loss_centers).mean()
-        #loss_centers = sum(l_cnt.mean() for l_cnt in loss_centers) / len(loss_centers)
+    #     # for stuff classes, predict zero delta
+    #     st_regions = st_masks.max(1)[0]
+    #     loss_bg = (center_proj.pow(2).sum(1, keepdim=True) * st_regions).mean()
 
-        # for stuff classes, predict zero delta
-        st_regions = st_masks.max(1)[0]
-        loss_bg = (center_proj.pow(2).sum(1, keepdim=True) * st_regions).mean()
+    #     loss = {
+    #             'loss_geo_th': loss_centers * 10,
+    #             'loss_geo_st': loss_bg * 10}
+    #     return loss
 
-        loss = {
-                'loss_geo_th': loss_centers * 10,
-                'loss_geo_st': loss_bg * 10}
-        return loss
+    # def loss_implicit_geometric(self, center_proj, ref_pos, th_masks_list, st_masks, img_metas):
+    #     assert center_proj.shape == ref_pos.shape, (center_proj.shape, ref_pos.shape)
+    #     H, W = center_proj.shape[-2:]
+    #     self.tmp_state.update({'implicit_center_proj': center_proj})
 
-    def loss_implicit_geometric(self, center_proj, ref_pos, th_masks_list, st_masks, img_metas):
-        #H, W = th_masks_list[0].shape[-2:]
-        #center_proj = F.interpolate(center_proj, (H, W), mode='bilinear', align_corners=False)
-        assert center_proj.shape == ref_pos.shape, (center_proj.shape, ref_pos.shape)
-        H, W = center_proj.shape[-2:]
-        self.tmp_state.update({'implicit_center_proj': center_proj})
+    #     # for thing classes, predict their center.
+    #     ref_pos = ref_pos.detach()
+    #     pred_centers_all = center_proj + ref_pos
 
-        # for thing classes, predict their center.
-        ref_pos = ref_pos.detach()
-        pred_centers_all = center_proj + ref_pos
+    #     loss_centers = []
+    #     for i, th_masks in enumerate(th_masks_list):
+    #         th_masks = F.interpolate(th_masks.detach()[None].float(), (H, W), mode='bilinear', align_corners=False)[0]
+    #         areas = th_masks.sum((1, 2))
+    #         centers = (th_masks[:, None] * ref_pos[i:i+1]).sum((2, 3)) / areas[:, None].clip(min=1) # [n, 128]
+    #         centers = centers[:, :, None, None].expand(-1, -1, H, W)
+    #         pred_centers = pred_centers_all[i:i+1].expand(len(th_masks), -1, -1, -1) # [n, 128, H, W]
 
-        loss_centers = []
-        for i, th_masks in enumerate(th_masks_list):
-            th_masks = F.interpolate(th_masks.detach()[None].float(), (H, W), mode='bilinear', align_corners=False)[0]
-            areas = th_masks.sum((1, 2))
-            centers = (th_masks[:, None] * ref_pos[i:i+1]).sum((2, 3)) / areas[:, None].clip(min=1) # [n, 128]
-            centers = centers[:, :, None, None].expand(-1, -1, H, W)
-            pred_centers = pred_centers_all[i:i+1].expand(len(th_masks), -1, -1, -1) # [n, 128, H, W]
+    #         loss_center = ((centers - pred_centers)**2).sum(1)
+    #         loss_center = (loss_center * th_masks).sum((1, 2)) / (H * W)
 
-            loss_center = ((centers - pred_centers)**2).sum(1)
-            loss_center = (loss_center * th_masks).sum((1, 2)) / (H * W)
+    #         loss_centers.append(loss_center * (areas > 10))
 
-            loss_centers.append(loss_center * (areas > 10))
+    #     loss_centers = torch.cat(loss_centers).mean()
 
-        loss_centers = torch.cat(loss_centers).mean()
+    #     # for stuff classes, predict zero delta
+    #     st_masks = F.interpolate(st_masks.float(), (H, W), mode='bilinear', align_corners=False)
+    #     st_regions = st_masks.max(1)[0]
+    #     loss_bg = (center_proj.pow(2).sum(1, keepdim=True) * st_regions).mean()
 
-        # for stuff classes, predict zero delta
-        st_masks = F.interpolate(st_masks.float(), (H, W), mode='bilinear', align_corners=False)
-        st_regions = st_masks.max(1)[0]
-        loss_bg = (center_proj.pow(2).sum(1, keepdim=True) * st_regions).mean()
+    #     loss = {
+    #             'loss_impgeo_th': loss_centers * 10,
+    #             'loss_impgeo_st': loss_bg * 10 }
+    #     return loss
 
-        loss = {
-                'loss_impgeo_th': loss_centers * 10,
-                'loss_impgeo_st': loss_bg * 10 }
-        return loss
+    # def loss_boundary(self, boundary_proj, pl_masks_list, pl_stuff_masks, img_metas):
+    #     images = self.tmp_state['img']
+    #     H, W = images.shape[-2:]
+    #     boundary_proj = F.interpolate(boundary_proj[None], (H, W), mode='bilinear', align_corners=False)[0]
 
-    def loss_boundary(self, boundary_proj, pl_masks_list, pl_stuff_masks, img_metas):
-        images = self.tmp_state['img']
-        H, W = images.shape[-2:]
-        boundary_proj = F.interpolate(boundary_proj[None], (H, W), mode='bilinear', align_corners=False)[0]
+    #     #
+    #     target_boundary = image_to_boundary(images)
+    #     #target_boundary = (target_boundary > 0.5).float()
+    #     target_boundary = target_boundary / target_boundary[:, 5:-5, 5:-5].max().view(-1, 1, 1).clip(min=1e-5)
+    #     target_boundary.clip_(min=0, max=1) # [n, h, w]
+    #     target_boundary = F.max_pool2d(target_boundary[None], 3, 1, 1)[0]
 
-        #
-        target_boundary = image_to_boundary(images)
-        #target_boundary = (target_boundary > 0.5).float()
-        target_boundary = target_boundary / target_boundary[:, 5:-5, 5:-5].max().view(-1, 1, 1).clip(min=1e-5)
-        target_boundary.clip_(min=0, max=1) # [n, h, w]
-        target_boundary = F.max_pool2d(target_boundary[None], 3, 1, 1)[0]
+    #     #
+    #     pl_masks = [torch.cat([tmsk, smsk]).float() for tmsk, smsk in zip(pl_masks_list, pl_stuff_masks)]
+    #     pl_masks_avg = [F.avg_pool2d(pmsk[None], 3, 1, 1)[0] for pmsk in pl_masks]
+    #     pl_edge = torch.stack([(pmsk - pmsk_avg).abs().max(0)[0] > 1e-3 for pmsk, pmsk_avg in zip(pl_masks, pl_masks_avg)]).float() # [n, H, W]
+    #     pl_edge = torch.maximum(pl_edge, target_boundary)
 
-        #
-        pl_masks = [torch.cat([tmsk, smsk]).float() for tmsk, smsk in zip(pl_masks_list, pl_stuff_masks)]
-        pl_masks_avg = [F.avg_pool2d(pmsk[None], 3, 1, 1)[0] for pmsk in pl_masks]
-        pl_edge = torch.stack([(pmsk - pmsk_avg).abs().max(0)[0] > 1e-3 for pmsk, pmsk_avg in zip(pl_masks, pl_masks_avg)]).float() # [n, H, W]
-        pl_edge = torch.maximum(pl_edge, target_boundary)
-
-        # loss
-        alpha = 0.1
-        losses = {}
-        for i, tgt in enumerate([target_boundary, pl_edge]):
-            pt = (boundary_proj.sigmoid() * tgt) + ((-boundary_proj).sigmoid() * (1 - tgt))
-            at = alpha * tgt + (1 - alpha) * (1 - tgt)
-            loss = - F.logsigmoid(boundary_proj) * tgt - F.logsigmoid(-boundary_proj) * (1 - tgt)
-            loss = (1 - pt).pow(2) * at * loss
-            losses[f'loss_bnd{i}'] = loss.mean() * 100
-        self.tmp_state.update({'pred_boundary': boundary_proj, 'target_boundarys': [target_boundary, pl_edge]})
-        return losses
+    #     # loss
+    #     alpha = 0.1
+    #     losses = {}
+    #     for i, tgt in enumerate([target_boundary, pl_edge]):
+    #         pt = (boundary_proj.sigmoid() * tgt) + ((-boundary_proj).sigmoid() * (1 - tgt))
+    #         at = alpha * tgt + (1 - alpha) * (1 - tgt)
+    #         loss = - F.logsigmoid(boundary_proj) * tgt - F.logsigmoid(-boundary_proj) * (1 - tgt)
+    #         loss = (1 - pt).pow(2) * at * loss
+    #         losses[f'loss_bnd{i}'] = loss.mean() * 100
+    #     self.tmp_state.update({'pred_boundary': boundary_proj, 'target_boundarys': [target_boundary, pl_edge]})
+    #     return losses
 
     @torch.no_grad()
     def get_pseudo_gt_from_semantic(self, 
@@ -1100,77 +971,19 @@ class WsupPanformerHead(DETRHeadv2):
         coords = coords_raw / coords_raw.new_tensor([H, W]).view(1, 1, 2)
         bsz = len(gt_masks_list)
 
-        if _USE_CENTER:
-            coords_ref = torch.stack(torch.meshgrid(torch.arange(H), torch.arange(W))).to(pred_masks) # [2, H, W]
-            coords_ref = coords_ref / coords_ref.max(1, keepdim=True)[0].max(2, keepdim=True)[0]
-            center_proj = F.interpolate(center_proj, (H, W), mode='bilinear', align_corners=False)
-            center_coords = (coords_ref[None] + center_proj).clip(min=0, max=1)
-
-        if _USE_IMPLICIT_CENTER:
-            implicit_center_coords = memory_pos + implicit_center_proj
-            ih, iw = implicit_center_coords.shape[-2:]
-            ifactor = implicit_center_coords.new_tensor([1, ih / H, iw / W])
 
         # feat metric distance
-        #memory_proj = F.interpolate(memory_proj, (H, W), mode='bilinear', align_corners=False)
-        if _USE_FEATURE_EMBEDS:
-            mh, mw = memory_proj.shape[-2:]
-            mfactor = pred_mask_probs.new_tensor([1, mh / H, mw / W])
-            #self.tmp_state.update({'memory_proj': memory_proj})
+        mh, mw = memory_proj.shape[-2:]
+        mfactor = pred_mask_probs.new_tensor([1, mh / H, mw / W])
 
         out_bboxes_list, out_masks_list = [], []
         out_labels_list = gt_labels_list
         bbox_valid_list = []
 
-        # geo_scale = 16
-        # geo_measure_tensor = F.interpolate(pred_mask_probs, (H//geo_scale, W//geo_scale), mode='bilinear', align_corners=False).permute(0, 2, 3, 1).contiguous()
-        # gh, gw = geo_measure_tensor.shape[1:3]
-        # geo_measure_tensor_coords = torch.stack(torch.meshgrid(torch.arange(gh), torch.arange(gw)), -1).to(geo_measure_tensor)
-        # geo_measure_tensor_coords = geo_measure_tensor_coords / geo_measure_tensor_coords.new_tensor([gh, gw]).view(1, 1, 2)
-        # geo_measure_tensor = torch.cat([geo_measure_tensor, geo_measure_tensor_coords[None].expand(bsz, -1, -1, -1)], -1)
-        # np_geo_measure_tensor = geo_measure_tensor.data.cpu().numpy()
-        # gfactor = pred_mask_probs.new_tensor([1, gh / H, gw / W])
-
         for i in range(bsz):
             point_masks = gt_masks_list[i]
             if len(point_masks) == 0:
                 raise RuntimeError
-
-            # geometric distance
-            # geo_distances = []
-            # for point_mask in point_masks:
-            #     point_coords = coords[point_mask > 0] # [nPnts, 2]
-            #     if len(point_coords) == 0:
-            #         raise RuntimeError(f'Empty masks.')
-            #     distances = ((coords[:, :, None] - point_coords[None, None])**2).sum(-1) # [H, W, nPnts]
-            #     distances = distances.min(-1)[0]
-            #     geo_distances.append(distances)
-            # geo_distances = torch.stack(geo_distances) # [n, H, W]
-
-            # # dijkstra-based geometric distance
-            # pnt_indices = torch.nonzero(point_masks) # [N, 3]
-            # pnt_indices = (pnt_indices * gfactor).long()
-            # pnt_indices[:, 1].clip_(min=0, max=gh-1)
-            # pnt_indices[:, 2].clip_(min=0, max=gw-1)
-            # geo_distances = dijkstra2d(np_geo_measure_tensor[i], pnt_indices[:, 1:].data.cpu().numpy())
-            # geo_distances = torch.as_tensor(geo_distances, device=pnt_indices.device)
-            # ins_ind_masks = [pnt_indices[:, 0] == i for i in range(len(point_masks))]
-            # geo_distances = torch.stack([geo_distances[ind_mask].min(0)[0] for ind_mask in ins_ind_masks])
-            # geo_distances = F.interpolate(geo_distances[None], (H, W), mode='bilinear', align_corners=False)[0]
-            #geo_distances = geo_distances / geo_distances.max(1, keepdim=True)[0].max(2, keepdim=True)[0].clip(min=1)
-
-            # # feature distance
-            # pnt_indices = torch.nonzero(point_masks) # [N, 3]
-            # pnt_indices = (pnt_indices * mfactor).long()
-            # pnt_indices[:, 1].clip_(min=0, max=mh-1)
-            # pnt_indices[:, 2].clip_(min=0, max=mw-1)
-            # pnt_embeds = memory_proj[i][:, pnt_indices[:, 1], pnt_indices[:, 2]] # [dim, N]
-            # pnt_distances = 1 - torch.einsum('dhw,dn->nhw', memory_proj[i], pnt_embeds)
-            # pnt_distances = F.interpolate(pnt_distances[None], (H, W), mode='bilinear', align_corners=False)[0]
-            # pnt_distances = [pnt_distances[pnt_indices[:, 0]==i].min(0)[0] for i in range(len(point_masks))]
-            # pnt_distances = torch.stack(pnt_distances) # [n, H, W]
-            # #pnt_distances = pnt_distances - pnt_distances.min(2, keepdim=True)[0].min(1, keepdim=True)[0]
-            # #pnt_distances = pnt_distances / pnt_distances.max(2, keepdim=True)[0].max(1, keepdim=True)[0].clip(min=1e-5)
 
             # class distance
             pred_classes = pred_mask_probs[i][:self.num_things_classes] # [C, H, W]
@@ -1179,29 +992,6 @@ class WsupPanformerHead(DETRHeadv2):
             all_distance = cls_distances * 10
 
             # center distance
-            if _USE_CENTER:
-                pnt_indices = torch.nonzero(point_masks) # [N, 3]
-                ins_ind_masks = [pnt_indices[:, 0] == i for i in range(len(point_masks))]
-                pnt_cen_coords = center_coords[i][:, pnt_indices[:, 1], pnt_indices[:, 2]].T # [N, 2]
-                cen_distances = ((pnt_cen_coords[..., None, None] - center_coords[i:i+1])**2).sum(1) # [N, H, W]
-                cen_distances = torch.stack([cen_distances[ind_mask].min(0)[0] for ind_mask in ins_ind_masks])
-                all_distance = all_distance + cen_distances * 5
-            
-            if _USE_IMPLICIT_CENTER:
-                pnt_indices = torch.nonzero(point_masks) # [N, 3]
-                pnt_indices = (pnt_indices * ifactor.view(1, 3)).long()
-                pnt_indices[:, 1].clip_(min=0, max=ih-1)
-                pnt_indices[:, 2].clip_(min=0, max=iw-1)
-                ins_ind_masks = [pnt_indices[:, 0] == i for i in range(len(point_masks))]
-                pnt_cen_coords = implicit_center_coords[i][:, pnt_indices[:, 1], pnt_indices[:, 2]].T # [N, 2]
-                cen_distances = ((pnt_cen_coords[..., None, None] - implicit_center_coords[i:i+1])**2).sum(1) # [N, H, W]
-                cen_distances = torch.stack([cen_distances[ind_mask].min(0)[0] for ind_mask in ins_ind_masks])
-                cen_distances = F.interpolate(cen_distances[None], (H, W), mode='bilinear', align_corners=False)[0]
-                all_distance = all_distance + cen_distances * 5
-
-            #all_distance = geo_distances + cls_distances * 10 + cen_distances * 5
-            #all_distance = geo_distances + cls_distances * 10
-            #all_distance = cls_distances * 10 + cen_distances * 5
 
             num_ins = all_distance.shape[0]
             pseudo_gt = all_distance.argmin(0)
@@ -1231,11 +1021,6 @@ class WsupPanformerHead(DETRHeadv2):
             out_bboxes_list.append(pseudo_bboxes)
             out_masks_list.append(pseudo_gt)
 
-            #bbox_valid_list.append(pseudo_gt.new_tensor(mask_sizes) >= 10)
-
-        #out_labels_list = [x[mask] for x, mask in zip(out_labels_list, bbox_valid_list)]
-        #out_bboxes_list = [x[mask] for x, mask in zip(out_masks_list, bbox_valid_list)]
-        #out_masks_list = [x[mask] for x, mask in zip(out_masks_list, bbox_valid_list)]
         return out_labels_list, out_bboxes_list, out_masks_list, out_semantics_list
 
     @torch.no_grad()
@@ -1256,9 +1041,6 @@ class WsupPanformerHead(DETRHeadv2):
             gt_labels_list: List<bsz>[ [n,] ], in value {0, 1, ..., C-1}, class label of each thing class, 'n' is the number of instances in the sample.
             gt_masks_list:  List<bsz>[ [n, h, w] ], in value {0, 1}, 'n' is the number of instances in the sample.
         """
-        #images = self.tmp_state['img']
-        #H, W = all_sem_masks_logit_scaled.shape[-2:]
-        #images_ = F.interpolate(images, (H, W), mode='bilinear', align_corners=False)
         # semantic results
         pred_mask_probs = torch.maximum(pred_semantic_masks.softmax(1) * cls_labels[:, :, None, None], sup_semantic_masks)
         out_semantic_probs, out_semantics_list = pred_mask_probs.max(1)
@@ -1291,14 +1073,10 @@ class WsupPanformerHead(DETRHeadv2):
             images = self.tmp_state['img']
             img_edge = image_to_boundary(resize(images))
             boundary_proj = resize(boundary_proj.sigmoid()[None])[0]
-            #boundary_proj = boundary_proj - boundary_proj.min()
-            #boundary_proj = boundary_proj / boundary_proj.max()
-            #diff_bond = (neighbour_diff(img_edge[:, None], 'max') + neighbour_diff(boundary_proj[:, None], 'max')) / 2
             diff_bond = neighbour_diff(boundary_proj[:, None], 'max')
 
         # embed feature
-        if _USE_FEATURE_EMBEDS:
-            assert memory_proj is not None
+        assert memory_proj is not None
         if memory_proj is not None:
             memory_proj = resize(memory_proj)
             diff_feat = neighbour_diff(memory_proj, 'dot')
@@ -1306,7 +1084,6 @@ class WsupPanformerHead(DETRHeadv2):
         else:
             diff_feat = 0
 
-        #diff_all = diff_prob + diff_bond * 0.1 + diff_feat * 0.1
         diff_all = diff_prob * 1 + diff_bond * self.lambda_diff_bond + diff_feat * self.lambda_diff_feat
 
         # [n, h, w, 8]
@@ -1332,11 +1109,9 @@ class WsupPanformerHead(DETRHeadv2):
 
                 # min distance
                 mindist = dijkstra_image(diff_np[i], pnt_coords_np[:, 1:])
-                #mindist = np.array([mindist[pnt_coords_np[:, 0] == i].min(0) for i in range(len(gt_masks))])
                 mindist_max = 10
                 mindist_list = []
                 for ii in range(len(gt_masks)):
-                    #mindist_i = mindist[pnt_coords_np[:, 0] == ii]
                     mindist_i = mindist[pnt_indices[ii]]
                     if len(mindist_i) > 0:
                         mindist_list.append(mindist_i.min(0))
@@ -1360,33 +1135,6 @@ class WsupPanformerHead(DETRHeadv2):
                 pseudo_gt = likeli.argmax(0)
                 pseudo_gt[pred_mask_probs[i].argmax(0) >= self.num_things_classes] = len(likeli)
                 pseudo_gt = F.one_hot(pseudo_gt, len(likeli)+1)[..., :len(likeli)].permute(2, 0, 1).contiguous() # [n, h, w]
-
-                if ALPHA_SHAPE:
-                    if True:
-                        # full resoulution
-                        pnt_coords_raw_np = pnt_coords_raw.data.cpu().numpy()
-                        alpha_mask = get_alpha_shape(H, W, [pnt_coords_raw_np[pnt_indices[ii]][:, 1:] for ii in range(len(gt_masks))]).astype(np.float32)
-                        alpha_mask = torch.as_tensor(alpha_mask, dtype=torch.float32, device=pnt_coords_raw.device)
-                    else:
-                        # downsampled resolution
-                        alpha_mask = get_alpha_shape(h, w, [pnt_coords_np[pnt_indices[ii]][:, 1:] for ii in range(len(gt_masks))]).astype(np.float32)
-                        alpha_mask = torch.as_tensor(alpha_mask, dtype=torch.float32, device=pnt_coords.device)
-                        alpha_mask = F.interpolate(alpha_mask[None], (H, W), mode='bilinear', align_corners=False)[0]
-
-                    alpha_mask_conflict = alpha_mask.sum(0) > 1.001
-                    alpha_mask = alpha_mask * (1 - alpha_mask_conflict.float())[None] # [n, h, w]
-                    alpha_mask_exclude = alpha_mask.max(0, keepdim=True)[0] - alpha_mask # [n, h, w]
-
-                    assert pseudo_gt.shape == alpha_mask.shape
-                    pseudo_gt[alpha_mask.bool()] = 1
-                    pseudo_gt[alpha_mask_exclude.bool()] = 0
-
-            # revise semantic masks
-            if ALPHA_SHAPE:
-                sem_from_things_mask, sem_from_things_index = pseudo_gt.bool().max(0)
-                sem_from_things = gt_labels_list[i][sem_from_things_index.flatten()]
-                sem_from_things = sem_from_things.reshape(sem_from_things_mask.shape)
-                pl_semantics_list[i][sem_from_things_mask] = sem_from_things[sem_from_things_mask]
 
             # instance bboxes
             pseudo_bboxes = []
