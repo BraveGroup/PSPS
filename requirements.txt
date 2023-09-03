@@ -1,3 +1,8 @@
 git+https://github.com/cocodataset/panopticapi.git@master#egg=panopticapi
 timm
 scikit-learn
+scikit-image
+pycocotools
+shapely
+terminaltables
+pybind11
