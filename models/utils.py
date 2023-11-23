@@ -12,6 +12,8 @@ from mmdet.datasets.coco_panoptic import INSTANCE_OFFSET
 from mmcv.runner.hooks import Hook, HOOKS
 # training-time visualizer
 
+def cprint(string):
+    print(f'\033[95m{string}\033[0m')
 
 def as_list(x):
     return x if isinstance(x, list) else [x]

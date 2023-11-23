@@ -6,4 +6,7 @@
 
 #./tools/dist_train.sh ./configs/panformer/panformer_voc_wsup.py 8 --work-dir ./work_dir/voc_20ep
 
-./tools/dist_train.sh ./configs/panformer/pointsup_r50_voc.py 1 --work-dir ./work_dir/voc
+#./tools/dist_train.sh ./configs/panformer/pointsup_r50_voc.py 8 --work-dir ./work_dir/voc_repeat
+
+#PYTHONPATH='./' python ./tools/train.py ./configs/models/r50_voc.py --work-dir ./work_dir/voc_new
+./tools/dist_train.sh ./configs/models/r50_voc.py 8 --work-dir ./work_dir/voc_new

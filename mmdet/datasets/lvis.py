@@ -267,6 +267,8 @@ class LVISV05Dataset(CocoDataset):
         'wrench', 'wristband', 'wristlet', 'yacht', 'yak', 'yogurt',
         'yoke_(animal_equipment)', 'zebra', 'zucchini')
 
+    PALETTE = None
+
     def load_annotations(self, ann_file):
         """Load annotation from lvis style annotation file.
 
@@ -341,7 +343,7 @@ class LVISV05Dataset(CocoDataset):
                 warnings.warn(
                     'mmlvis is deprecated, please install official lvis-api by "pip install git+https://github.com/lvis-dataset/lvis-api.git"',  # noqa: E501
                     UserWarning)
-            from lvis import LVISResults, LVISEval
+            from lvis import LVISEval, LVISResults
         except ImportError:
             raise ImportError(
                 'Package lvis is not installed. Please run "pip install git+https://github.com/lvis-dataset/lvis-api.git".'  # noqa: E501
@@ -406,7 +408,7 @@ class LVISV05Dataset(CocoDataset):
                 lvis_eval.summarize()
                 for k, v in lvis_eval.get_results().items():
                     if k.startswith('AR'):
-                        val = float('{:.3f}'.format(float(v)))
+                        val = float('{:.4f}'.format(float(v)))
                         eval_results[k] = val
             else:
                 lvis_eval.evaluate()
@@ -424,8 +426,10 @@ class LVISV05Dataset(CocoDataset):
                     for idx, catId in enumerate(self.cat_ids):
                         # area range index 0: all area ranges
                         # max dets index -1: typically 100 per image
-                        nm = self.coco.load_cats(catId)[0]
-                        precision = precisions[:, :, idx, 0, -1]
+                        # the dimensions of precisions are
+                        # [num_thrs, num_recalls, num_cats, num_area_rngs]
+                        nm = self.coco.load_cats([catId])[0]
+                        precision = precisions[:, :, idx, 0]
                         precision = precision[precision > -1]
                         if precision.size:
                             ap = np.mean(precision)
@@ -450,10 +454,10 @@ class LVISV05Dataset(CocoDataset):
                 for k, v in lvis_results.items():
                     if k.startswith('AP'):
                         key = '{}_{}'.format(metric, k)
-                        val = float('{:.3f}'.format(float(v)))
+                        val = float('{:.4f}'.format(float(v)))
                         eval_results[key] = val
                 ap_summary = ' '.join([
-                    '{}:{:.3f}'.format(k, float(v))
+                    '{}:{:.4f}'.format(k, float(v))
                     for k, v in lvis_results.items() if k.startswith('AP')
                 ])
                 eval_results['{}_mAP_copypaste'.format(metric)] = ap_summary

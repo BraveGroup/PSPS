@@ -1,12 +1,14 @@
-import copy
 import torch
 import torch.nn as nn
 
 from mmdet.models.utils.transformer import DeformableDetrTransformer
 from mmdet.models.utils.builder import TRANSFORMER
 from mmcv.runner.base_module import BaseModule
+
 from .attention import MultiheadAttentionWithMask
 
+import copy
+from .utils import cprint
 
 
 class _MLP(nn.Module):
@@ -38,11 +40,18 @@ class _DropPath(nn.Module):
         output = x.div(kp) * mask
         return output
 
-
 class MaskTransormerLayer(nn.Module):
-    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, num_levels=3,
-            self_attn=False, drop_path=0., norm_layer=nn.LayerNorm, act_layer=nn.GELU,
-            tail=False):
+    def __init__(self,
+                 embed_dim,
+                 num_heads,
+                 dropout=0.,
+                 bias=True,
+                 num_levels=3,
+                 self_attn=False,
+                 drop_path=0.,
+                 norm_layer=nn.LayerNorm,
+                 act_layer=nn.GELU,
+                 tail=False):
         super().__init__()
         self.mask_attn = MultiheadAttentionWithMask(
                 embed_dim=embed_dim,
@@ -99,11 +108,11 @@ class MaskTransormerLayer(nn.Module):
 
 
 @TRANSFORMER.register_module()
-class PanformerMaskDecoder(BaseModule):
+class MaskTransformerDecoder(BaseModule):
     def __init__(self,
-            d_model,
-            num_heads,
-            num_layers,
+            d_model=256,
+            num_heads=8,
+            num_layers=4,
             norm_layer=nn.LayerNorm,
             act_layer=nn.GELU,
             dropout=0,
@@ -116,7 +125,6 @@ class PanformerMaskDecoder(BaseModule):
         self.num_layers = num_layers
         self.num_levels = num_levels
 
-        #layer_cfg = dict(
         layer = MaskTransormerLayer(
                 embed_dim=d_model,
                 num_heads=num_heads,
@@ -127,35 +135,35 @@ class PanformerMaskDecoder(BaseModule):
                 drop_path=drop_path,
                 norm_layer=norm_layer,
                 act_layer=act_layer)
-        #layer_cfgs = [copy.deepcopy(layer_cfg) for _ in range(num_layers + 1)]
-        #layer_cfgs[-1].update({'tail': True})
-        #self.layers = nn.ModuleList([MaskTransormerLayer(**cfg) for cfg in layer_cfgs])
 
         self.layers = nn.ModuleList([copy.deepcopy(layer) for _ in range(num_layers)])
-        #self.layers = nn.ModuleList([MaskTransormerLayer(**layer_cfg) for _ in range(num_layers-1)])
-        #self.layer_tail = MaskTransormerLayer(**layer_cfg, tail=True)
 
     @staticmethod
     def with_pos(query, query_pos):
         return query if query_pos is None else query + query_pos
 
-    #def forward(self, query, key, value, key_padding_mask=None, attn_mask=None, hw_lvl=None):
     def forward(self, memory, query, memory_pos=None, query_pos=None,
             query_mask=None, memory_mask=None, hw_lvl=None):
-        """
-        Args:
-            query: Tensor of Shape [nQuery, bs, dim]
-            query_pos: position embedding of 'query'
-            query_mask: [Tensor | None], Tensor of shape [bs, nQuery], indicating which query should NOT be involved in the attention computation.
-            memory: Tensor of shape [sum(H_i*W_i), bs, dim]
-            memory_pos: position embedding of 'memory'
-            memory_mask: [Tensor | None], Tensor of shape [bs, sum(H_i*W_i)], indicating which elements in the memory should NOT be involved in the attention computation.
-
+        """Decoding Masks from previous transformer Encodings.
+        Input Args:
+            memory: [bs, nToken, dim], the output of the transformer encoder.
+            query:  [bs, nQuery, dim], 
+            hw_lvl: List of (h, w)s indicating spatial sizes of each memory scale, whose sum of production equals to nToken.
+            ...
         Returns:
-            inter_query: List[Tensor] of 'num_layers' query outputs, each of shape [nQuery, bs, dim]
-            inter_mask: List[Tensor] of 'num_layers' mask outputs, each of shape [bs, nQuery, h,  w]
+            inter_query: List of [bs, nQuery, dim], the list of query after each decoder layer.
+            inter_mask:  List of [bs, nQuery, h, w], the list of decoded masks of each decoder layer.
         """
         sizes = [h * w for h, w in hw_lvl]
+
+        # turn to the order of [nToken, batchSize, dim]
+        memory = memory.transpose(0, 1)
+        query = query.transpose(0, 1)
+        if memory_pos is not None:
+            memory_pos = memory_pos.transpose(0, 1)
+        if query_pos is not None:
+            query_pos = query_pos.transpose(0, 1)
+
         assert memory.shape[0] == sum(sizes), (memory.shape, sum(sizes))
 
         if len(hw_lvl) > self.num_levels:
@@ -185,21 +193,16 @@ class PanformerMaskDecoder(BaseModule):
                     key_padding_mask=memory_mask,
                     attn_mask=attn_mask,
                     hw_lvl=hw_lvl)
-            inter_query.append(query)
+            inter_query.append(query.transpose(0, 1)) # turn back to [bs, nQuery, dim]
             inter_mask.append(mask)
-        #assert inter_query[-1] is None, inter_query[-1].shape
-        #inter_query.pop()
+        
         return inter_query, inter_mask
 
 
 @TRANSFORMER.register_module()
-class DeformableDetrTransformer2(DeformableDetrTransformer):
-    """Copy-past from DeformableDetrTransformer, except that provides additional 
-    memory info for predicting masks by panformer.
-    """
-
+class DeformableDetrTransformerForMask(DeformableDetrTransformer):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super(DeformableDetrTransformerForMask, self).__init__(*args, **kwargs)
 
     def forward(self,
                 mlvl_feats,
@@ -210,6 +213,8 @@ class DeformableDetrTransformer2(DeformableDetrTransformer):
                 cls_branches=None,
                 **kwargs):
         """Forward function for `Transformer`.
+           This is a COPY-PASTE from mmdet,
+           except returning some additional internal variables for mask decoder.
 
         Args:
             mlvl_feats (list(Tensor)): Input queries from
@@ -318,6 +323,14 @@ class DeformableDetrTransformer2(DeformableDetrTransformer):
                     self.decoder.num_layers](output_memory) + output_proposals
 
             topk = self.two_stage_num_proposals
+            # We only use the first channel in enc_outputs_class as foreground,
+            # the other (num_classes - 1) channels are actually not used.
+            # Its targets are set to be 0s, which indicates the first
+            # class (foreground) because we use [0, num_classes - 1] to
+            # indicate class labels, background class is indicated by
+            # num_classes (similar convention in RPN).
+            # See https://github.com/open-mmlab/mmdetection/blob/master/mmdet/models/dense_heads/deformable_detr_head.py#L241 # noqa
+            # This follows the official implementation of Deformable DETR.
             topk_proposals = torch.topk(
                 enc_outputs_class[..., 0], topk, dim=1)[1]
             topk_coords_unact = torch.gather(
@@ -354,20 +367,13 @@ class DeformableDetrTransformer2(DeformableDetrTransformer):
             **kwargs)
 
         inter_references_out = inter_references
-
-        # additional info for mask decoder
-        args_tuple = (
-                memory, # [sum(H_i*W_i), bs, embed_dims]
-                lvl_pos_embed_flatten, # [sum(H_i*W_i), bs, embed_dims]
-                mask_flatten, # [bs, sum(H_i*W_i)]
-                inter_states[-1], # [num_query, bs, embed_dims]
-                query_pos, # [num_query, bs, embed_dims]
-                )
-
         if self.as_two_stage:
             return inter_states, init_reference_out,\
                 inter_references_out, enc_outputs_class,\
-                enc_outputs_coord_unact, args_tuple
+                enc_outputs_coord_unact,\
+                memory, lvl_pos_embed_flatten,\
+                mask_flatten, query_pos
         return inter_states, init_reference_out, \
-            inter_references_out, None, None, args_tuple
-
+                inter_references_out, None, None,\
+                memory, lvl_pos_embed_flatten,\
+                mask_flatten, query_pos

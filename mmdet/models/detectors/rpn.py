@@ -1,5 +1,6 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import warnings
+from inspect import signature
 
 import mmcv
 import torch
@@ -152,4 +153,10 @@ class RPN(BaseDetector):
         Returns:
             np.ndarray: The image with bboxes drawn on it.
         """
+        if kwargs is not None:
+            kwargs['colors'] = 'green'
+            sig = signature(mmcv.imshow_bboxes)
+            for k in list(kwargs.keys()):
+                if k not in sig.parameters:
+                    kwargs.pop(k)
         mmcv.imshow_bboxes(data, result, top_k=top_k, **kwargs)
