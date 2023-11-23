@@ -17,6 +17,8 @@ from mmdet.core import (build_assigner, build_sampler,
 from mmdet.models.builder import HEADS, build_loss
 import copy
 
+from .utils import cprint
+
 @HEADS.register_module()
 class MaskDETRHead(AnchorFreeHead):
     # Modified from mmdet's DETRHead and DeformableDETRHead, to adapt for masks
@@ -329,7 +331,7 @@ class MaskDETRHead(AnchorFreeHead):
         outputs_for_mask = (
             memory.permute(1, 0, 2)[:, :-last_feat_len, :],
             memory_mask[:, :-last_feat_len],
-            memory_pos[:, :-last_feat_len, :],
+            memory_pos.permute(1, 0, 2)[:, :-last_feat_len, :],
             hs[-1], # query
             query_pos.permute(1, 0, 2),
             hw_lvl[:-1],

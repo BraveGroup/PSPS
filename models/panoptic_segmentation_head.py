@@ -90,6 +90,7 @@ class PanopticSegmentationHead(MaskDETRHead):
 
     @force_fp32(apply_to=('x',))
     def forward_train(self,
+                      img,
                       x,
                       img_metas,
                       gt_bboxes,

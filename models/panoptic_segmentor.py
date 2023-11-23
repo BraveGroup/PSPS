@@ -77,7 +77,7 @@ class PanopticSegmentor(SingleStageDetector):
                 gt_semantic_seg_pad[i, :h, :w] = gt_semantic_seg[i, :h, :w]
 
         losses = self.bbox_head.forward_train(
-            x, img_metas, gt_bboxes, gt_labels, gt_bboxes_ignore,
+            img, x, img_metas, gt_bboxes, gt_labels, gt_bboxes_ignore,
             gt_masks_list, gt_semantic_seg_pad)
         return losses
 
