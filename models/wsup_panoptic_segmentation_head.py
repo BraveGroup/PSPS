@@ -179,7 +179,8 @@ class WSupPanopticSegmentationHead(PanopticSegmentationHead):
         # Adjust the losses by the warm-up strategy
         weight = max(min(self.iter_count / self.warmup_iter, 1), 0)
         self.iter_count += 1
-        losses.update({k: v * weight for k, v in loss_pl.items()})
+        losses = {k: v * weight for k, v in losses.items()}
+        losses.update(loss_pl)
         return losses
 
     def get_semantic(self,
@@ -478,7 +479,7 @@ class WSupPanopticSegmentationHead(PanopticSegmentationHead):
         losses = []
         for i, (gl_masks, pl_masks) in enumerate(zip(gt_masks_list, pl_masks_list)):
             # [N, 3], each row contains [insID, h, w]
-            pl_masks = F.interpolate(pl_masks[None].float(), (h, w),
+            pl_masks = F.interpolate(pl_masks[None].detach().float(), (h, w),
                                      mode='bilinear', align_corners=False)[0]
 
             coords = (torch.nonzero(gl_masks) * coord_factor).long()
