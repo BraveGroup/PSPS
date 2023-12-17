@@ -75,6 +75,10 @@ class WSupPanopticSegmentationHead(PanopticSegmentationHead):
                  point_expand_size=17,
                  lambda_boundary=0.1,
                  lambda_embedding=0.1,
+                 semantic_mask_decoder=dict(
+                    type='MaskTransformerDecoder',
+                    num_layers=4,
+                    self_attn=False),
                  warmup_iter=700,
                  **kwargs):
         super(WSupPanopticSegmentationHead, self).__init__(*args, **kwargs)
@@ -87,7 +91,7 @@ class WSupPanopticSegmentationHead(PanopticSegmentationHead):
 
         # additional semantic branches
         num_classes = self.num_thing_classes + self.num_stuff_classes
-        self.semantic_mask_decoder = build_transformer(kwargs['stuff_mask_decoder'])
+        self.semantic_mask_decoder = build_transformer(semantic_mask_decoder)
         self.semantic_query = nn.Embedding(num_classes, self.embed_dims * 2)
 
         def _get_clones(module, N):

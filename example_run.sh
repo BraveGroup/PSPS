@@ -11,4 +11,21 @@
 #PYTHONPATH='./' python ./tools/train.py ./configs/models/r50_voc_wsup.py --work-dir ./work_dir/voc_wsup_new
 
 #./tools/dist_train.sh ./configs/models/r50_voc.py 8 --work-dir ./work_dir/voc_new
-./tools/dist_train.sh ./configs/models/r50_voc_wsup.py 8 --work-dir ./work_dir/voc_new
+
+# no self_attn, 4 layers, GOOD!
+#./tools/dist_train.sh ./configs/models/r50_voc_wsup.py 8 --work-dir ./work_dir/voc_wsup_simpler_semantic
+
+# coco no self_attn, 4 layers,(4-6-4) GOOD!
+#./tools/dist_train.sh ./configs/models/r50_coco_wsup.py 8 --work-dir ./work_dir/coco_wsup
+
+# coco no self_attn, 4-4-2, Better!
+#./tools/dist_train.sh ./configs/models/r50_coco_wsup.py 8 --work-dir ./work_dir/coco_wsup_442
+
+# coco no self_attn, 2-2-2, similar to original results.
+#./tools/dist_train.sh ./configs/models/r50_coco_wsup.py 8 --work-dir ./work_dir/coco_wsup_222
+
+# no self_attn, 4-4, not work.
+#./tools/dist_train.sh ./configs/models/r50_voc_wsup_v2.py 8 --work-dir ./work_dir/voc_wsup_v2
+
+# semantic head no self-attn, 442
+./tools/dist_train.sh ./configs/models/r50_voc_wsup.py 8 --work-dir ./work_dir/voc_wsup_442

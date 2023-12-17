@@ -25,7 +25,7 @@ model = dict(
         norm_cfg=dict(type='GN', num_groups=32),
         num_outs=4),
     bbox_head=dict(
-        type='WSupPanopticSegmentationHead',
+        type='WSupPanopticSegmentationHeadV2',
         num_query=300,
         num_thing_classes=20,
         num_stuff_classes=1,
@@ -42,10 +42,7 @@ model = dict(
             num_layers=4),
         stuff_mask_decoder=dict(
             type='MaskTransformerDecoder',
-            num_layers=4, self_attn=True),
-        semantic_mask_decoder=dict(
-            type='MaskTransformerDecoder',
-            num_layers=2, self_attn=False),
+            num_layers=4, self_attn=False),
         transformer=dict(
             type='DeformableDetrTransformerForMask',
             encoder=dict(

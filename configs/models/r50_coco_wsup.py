@@ -1,5 +1,5 @@
 _base_ = [
-    '../_base_/datasets/voc_points.py',
+    '../_base_/datasets/coco_points.py',
     #'../_base_/datasets/voc_panoptic.py',
     '../_base_/default_runtime.py'
 ]
@@ -27,12 +27,12 @@ model = dict(
     bbox_head=dict(
         type='WSupPanopticSegmentationHead',
         num_query=300,
-        num_thing_classes=20,
-        num_stuff_classes=1,
+        num_thing_classes=80,
+        num_stuff_classes=53,
         point_expand_size=17,
         lambda_boundary=0.1,
         lambda_embedding=0.1,
-        warmup_iter=700,
+        warmup_iter=14659,
         in_channels=2048,
         sync_cls_avg_factor=True,
         as_two_stage=False,
@@ -117,11 +117,11 @@ optimizer = dict(
             'reference_points': dict(lr_mult=0.1)
         }))
 optimizer_config = dict(grad_clip=dict(max_norm=0.1, norm_type=2))
-lr_config = dict(policy='step', step=[15])
-runner = dict(type='EpochBasedRunner', max_epochs=20)
+
+lr_config = dict(policy='step', step=[8])
+runner = dict(type='EpochBasedRunner', max_epochs=12)
 
 #custom_hooks = [dict(type='VisualizationHook', priority='LOWEST', interval=50)]
 custom_imports = dict(
     imports=["datasets", "models"],
     allow_failed_imports=False)
-
