@@ -27,6 +27,8 @@ class PanopticSegmentor(SingleStageDetector):
             test_cfg,
             pretrained,
             init_cfg)
+        
+        self.state_record = {}
 
     def forward_train(self,
                       img,

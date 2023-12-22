@@ -11,6 +11,7 @@ from panopticapi.utils import IdGenerator
 from mmdet.datasets.coco_panoptic import INSTANCE_OFFSET
 
 from mmcv.runner.hooks import Hook, HOOKS
+from mmdet.core.visualization import get_palette
 # training-time visualizer
 
 def expand_target_masks(target_mask, size):
@@ -188,6 +189,163 @@ def cprint(string):
 def as_list(x):
     return x if isinstance(x, list) else [x]
 
+class VisHelper:
+    dataset = 'voc'
+    PALETTE_VOID = (225, 225, 196)
+    if dataset == 'coco':
+        PALETTE = np.array(get_palette('coco', 133)).astype(np.uint8)
+    elif dataset == 'voc':
+        PALETTE = np.array(get_palette('voc', 20)).astype(np.uint8)
+        PALETTE = np.vstack([PALETTE, np.zeros((1, 3), np.uint8)])
+    if len(PALETTE < 256):
+        _new_palette = np.array([PALETTE_VOID] * 256).astype(np.uint8)
+        _new_palette[:len(PALETTE)] = PALETTE
+        PALETTE = _new_palette
+
+    @staticmethod
+    def visImage(image):
+        if isinstance(image, torch.Tensor):
+            image = image.data.cpu().numpy()
+
+        assert isinstance(image, np.ndarray), type(image)
+        assert image.ndim == 3, image.shape
+
+        # shortcut, if already processed
+        if image.dtype == np.uint8:
+            return image
+
+        # Guess the dim, if (3, H, W), transpose to (H, W, 3)
+        if image.shape[0] == 3 and image.shape[2] != 3:
+            image = image.transpose(1, 2, 0)
+
+        img_min = image.min()
+        img_max = image.max()
+        mean=(123.675, 116.28, 103.53)
+        std=(58.395, 57.12, 57.375)
+
+        # Guess: [0, 1] range
+        if img_min >= 0 and img_max <= 1:
+            image = image * 255
+
+        # Guess: [0, 255]
+        if img_min >= 0 and img_max <= 255:
+            pass
+        else:
+            image = image * std + mean
+
+        image = np.clip(image, a_min=0, a_max=255).astype(np.uint8)
+        return image
+
+    @staticmethod
+    def visPanoptic(result, image=None):
+        taken_colors = set()
+        def get_color(catId):
+            def random_color(base, max_dist=30):
+                new_color = base + np.random.randint(low=-max_dist,
+                                                     high=max_dist+1,
+                                                     size=3)
+                return tuple(np.maximum(0, np.minimum(255, new_color)))
+
+            base_color = tuple(VisHelper.PALETTE[catId])
+            if base_color not in taken_colors:
+                taken_colors.add(base_color)
+                return base_color
+            else:
+                while True:
+                    color = random_color(VisHelper.PALETTE[catId])
+                    if color not in taken_colors:
+                        taken_colors.add(color)
+                        return color
+
+        if isinstance(result, torch.Tensor):
+            result = result.data.cpu().numpy()
+        assert result.ndim == 2, result.shape
+
+        out = np.full(result.shape+(3,), 128, np.uint8)
+        for idx in np.unique(result):
+            catId = idx % INSTANCE_OFFSET
+            mask = result == idx
+            color = get_color(catId)
+            out[mask] = color
+
+        pan_edge = get_pan_edge(out)
+
+        if image is not None:
+            image = VisHelper.visImage(image)
+            image = cv2.resize(image, out.shape[:2][::-1])
+            out = cv2.addWeighted(image, 0.2, out, 0.8, 0)
+
+        out[pan_edge] = (255, 255, 255)
+        return out
+    
+    @staticmethod
+    def visSemantic(result, image=None):
+        if isinstance(result, torch.Tensor):
+            result = result.data.cpu().numpy()
+        assert result.ndim == 2, result.shape
+
+        result_label = result % INSTANCE_OFFSET
+        color = VisHelper.PALETTE[result_label.ravel()].reshape(result.shape+(3,))
+
+        if image is not None:
+            image = VisHelper.visImage(image)
+            image = cv2.resize(image, color.shape[:2][::-1])
+            color = cv2.addWeighted(image, 0.2, color, 0.8, 0)
+        return color
+    
+    @staticmethod
+    def visBox(image, bboxes):
+        def get_color():
+            return tuple(random.randint(0, 255) for _ in range(3))
+
+        image = VisHelper.visImage(image)
+
+        if isinstance(bboxes, torch.Tensor):
+            bboxes = bboxes.data.cpu().numpy()
+        bboxes = bboxes[:, :4].astype(np.int64)
+
+        out = image.copy()
+        for i, (x0, y0, x1, y1) in enumerate(bboxes):
+            color = get_color()
+            cv2.rectangle(out, (x0, y0), (x1, y1), color, 5)
+
+        return out
+
+    @staticmethod
+    def vstack(images, width=None, space=3):
+        assert isinstance(images, (list, tuple)), type(images)
+        assert all([isinstance(x, np.ndarray) for x in images]), [type(x) for x in images]
+        images = [x[..., None].repeat(3, -1) if x.ndim == 2 else x for x in images]
+        assert all([x.ndim ==3 and x.shape[2] == 3 for x in images]), [x.shape for x in images]
+
+        if len(images) == 0:
+            return None
+        if len(images) == 1:
+            return images[0]
+
+        W = max(x.shape[1] for x in images) if width is None else width
+        for i in range(len(images)):
+            h, w = images[i].shape[:2]
+            H = h * W // w
+            images[i] = cv2.resize(images[i], (W, H))
+
+        if space > 0:
+            margin = np.full((space, W, 3), 255, np.uint8)
+            images = sum([[img, margin] for img in images], [])[:-1]
+        out = np.vstack(images)
+        return out
+
+    @staticmethod
+    def hstack(images, height=None, space=3):
+        assert isinstance(images, (list, tuple)), type(images)
+        assert all([isinstance(x, np.ndarray) for x in images]), [type(x) for x in images]
+        images = [x[..., None].repeat(3, -1) if x.ndim == 2 else x for x in images]
+        assert all([x.ndim == 3 and x.shape[2] == 3 for x in images]), [x.shape for x in images]
+        out = imvstack([x.transpose(1, 0, 2) for x in images], width=height, space=space)
+        if out is not None:
+            out = out.transpose(1, 0, 2)
+        return out
+
 def _get_rgb_image(image, mean=(123.675, 116.28, 103.53), std=(58.395, 57.12, 57.375)):
     if isinstance(image, np.ndarray) and image.dtype == np.uint8:
         assert image.ndim == 3 and image.shape[2] == 3, image.shape
@@ -343,7 +501,45 @@ def imhstack(images, height=None, space=3):
         out = out.transpose(1, 0, 2)
     return out
 
+@HOOKS.register_module()
+class SimpleVisHook(Hook):
+    def __init__(self, interval):
+        self.interval = interval
+        self.cache = []
 
+    def should_visualize(self, runner):
+        if runner.rank != 0:
+            return False
+        return self.every_n_iters(runner, self.interval)
+
+    def save_image(self, image, filename):
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        cv2.imwrite(filename, image[..., ::-1])
+
+    def after_train_iter(self, runner):
+        if not self.should_visualize(runner):
+            return
+        
+        model = runner.model.module
+        results = model.bbox_head.get_visualization()
+        
+        self.cache.append(results)
+        self.save_image(results, os.path.join(runner.work_dir,
+                                              'visualization',
+                                              'last.jpg'))
+
+    def after_train_epoch(self, runner):
+        if runner.rank != 0:
+            return
+        if len(self.cache) == 0:
+            return
+        
+        results = VisHelper.vstack(self.cache)
+        self.save_image(results, os.path.join(runner.work_dir,
+                                              'visualization',
+                                              f'epoch{runner.epoch}.jpg'))
+        self.cache = []
+        
 @HOOKS.register_module()
 class VisualizationHook(Hook):
     def __init__(self, dataset, interval):

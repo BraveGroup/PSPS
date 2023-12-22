@@ -25,9 +25,11 @@ from .utils import (expand_target_masks, partial_cross_entropy_loss,
 from pydijkstra import dijkstra_image
 import numpy as np
 
-from .utils import cprint
+from .utils import cprint, VisHelper
+from sklearn.decomposition import PCA
 
 __all__ = ['WSupPanopticSegmentationHead']
+
 
 class FeatureProjection(nn.Module):
     def __init__(self, in_channels, out_channels, norm='l2'):
@@ -126,6 +128,15 @@ class WSupPanopticSegmentationHead(PanopticSegmentationHead):
         sparse point annotations.
         'gt_bboxes' is never used.
         """
+
+        # for visualization purpose
+        self.state_record = {
+            'img': img,
+            'img_metas': img_metas,
+            'gt_labels': gt_labels,
+            'gt_masks': gt_masks,
+            'gt_semantic_seg': gt_semantic_seg,
+        }
         
         *outs, outs_for_mask = self.forward(x, img_metas)
 
@@ -185,6 +196,7 @@ class WSupPanopticSegmentationHead(PanopticSegmentationHead):
         self.iter_count += 1
         losses = {k: v * weight for k, v in losses.items()}
         losses.update(loss_pl)
+
         return losses
 
     def get_semantic(self,
@@ -269,6 +281,11 @@ class WSupPanopticSegmentationHead(PanopticSegmentationHead):
         given_semantic = target_mask.unflatten(0, (bs, num_classes))
         semantic_existence = target_weight.view(bs, -1)
 
+        self.state_record.update({
+            'semantic_head_prediction': pred_semantic,
+            'semantic_head_label': target_mask,
+        })
+
         return pred_semantic, given_semantic, semantic_existence, losses
 
 
@@ -278,6 +295,11 @@ class WSupPanopticSegmentationHead(PanopticSegmentationHead):
                       memory_mask,
                       hw_lvl):
         embedding = self.feature_proj(memory, memory_pos, memory_mask, hw_lvl)
+
+        self.state_record.update({
+            'embedding_head_prediction': embedding
+        })
+
         return embedding
 
     @torch.no_grad()
@@ -452,8 +474,13 @@ class WSupPanopticSegmentationHead(PanopticSegmentationHead):
                                              pl_stuff_masks)
         losses.update(loss_embedding)
 
-        return losses, pl_bboxes, pl_masks, pl_semantics
+        self.state_record.update({
+            'pl_bboxes': pl_bboxes,
+            'pl_masks': pl_masks,
+            'pl_semantics': pl_semantics
+        })
 
+        return losses, pl_bboxes, pl_masks, pl_semantics
 
     def loss_embedding(self,
                        embedding,
@@ -503,3 +530,158 @@ class WSupPanopticSegmentationHead(PanopticSegmentationHead):
         losses = sum(losses) / len(losses)
         return dict(loss_embed = losses)
 
+    @torch.no_grad()
+    def get_visualization_panoptic(self, th_cls, th_masks, st_cls, st_masks):
+        # classification scores and labels
+        th_scores, th_labels = th_cls.max(1)
+        cls_scores = torch.cat([th_scores, st_cls])
+
+        st_labels = torch.arange(self.num_stuff_classes).to(th_labels) + \
+            self.num_thing_classes
+        labels = torch.cat([th_labels, st_labels])
+
+        # mask scores
+        masks = torch.cat([th_masks, st_masks])
+        bmasks = masks > 0.5 
+        mask_scores = (masks * bmasks).sum((1, 2)) / bmasks.sum((1, 2)).clip(min=1)
+
+        scores = cls_scores * mask_scores**2
+
+        # merge
+        num_classes = self.num_thing_classes + self.num_stuff_classes
+        pan_result = torch.full(masks.shape[-2:], num_classes,
+                                device=masks.device,
+                                dtype=torch.long)
+        pan_scores = torch.zeros(masks.shape[-2:],
+                                 device=masks.device,
+                                 dtype=torch.float32)
+        filled = torch.zeros(masks.shape[-2:],
+                             device=masks.device,
+                             dtype=torch.bool)
+
+        scores, indices = torch.sort(scores, descending=True)
+        panId = 1
+        for i, score in zip(indices, scores):
+            L = labels[i]
+            M = bmasks[i] & (~filled)
+            if M.sum() == 0:
+                continue
+        
+            pan_result[M] = panId * INSTANCE_OFFSET + L
+            filled[M] = True
+            pan_scores[M] = masks[i][M]**2 * score
+            panId += 1
+        return pan_result, pan_scores
+
+    @torch.no_grad()
+    def get_visualization_panoptic_simple(self, gt_labels, gt_masks, gt_semantics):
+        assert gt_semantics.ndim == 2, gt_semantics.shape
+
+        result = gt_semantics.clone().long()
+        panId = 1
+        for L, M in zip(gt_labels, gt_masks.bool()):
+            if M.sum() == 0:
+                continue
+            result[M] = panId * INSTANCE_OFFSET + L
+            panId += 1
+        return result
+
+    @torch.no_grad()
+    def get_visualization_semantic(self, semantics):
+        score, result = semantics.max(0)
+        return result
+
+    @torch.no_grad()
+    def get_visualization_feature(self, feature):
+        dim, h, w = feature.shape
+        feature = feature.data.cpu().numpy()
+        out = PCA(n_components=3).fit_transform(feature.reshape(-1, h * w).T)
+        out -= out.min()
+        out /= out.max() + 1e-5
+        out = out.reshape(h, w, 3)
+        return out
+
+    @torch.no_grad()
+    def get_visualization(self):
+        bsz = len(self.state_record['img_metas'])
+
+        all_results = []
+
+        # preprocess to split thing results for different images
+        pod_inds_list = self.state_record['pred_thing_pos_inds']
+        all_th_masks = self.state_record['pred_thing_masks']
+        offset = 0
+        all_th_masks_list = []
+        for pos_inds in pod_inds_list:
+            all_th_masks_list.append(all_th_masks[offset:offset+len(pos_inds)])
+            offset += len(pos_inds)
+        assert offset == all_th_masks.shape[0], (all_th_masks.shape, pod_inds_list)
+
+        for i in range(bsz):
+            visResults = []
+
+            # GT
+            img = self.state_record['img'][i]
+            img_meta = self.state_record['img_metas'][i]
+
+            gt_labels = self.state_record['gt_labels'][i]
+            gt_masks = self.state_record['gt_masks'][i]
+            gt_semantic_seg = self.state_record['gt_semantic_seg'][i]
+
+            visImage = VisHelper.visImage(img)
+            #gt_pan = self.get_visualization_panoptic_simple(gt_labels, gt_masks, gt_semantic_seg)
+            #visGtPan = VisHelper.visPanoptic(gt_pan, visImage)
+            #visResults.append(visImage)
+            #visResults.append(visGtPan)
+
+            # pseudo labels
+            pl_bboxes = self.state_record['pl_bboxes'][i]
+            pl_masks = self.state_record['pl_masks'][i]
+            pl_semantics = self.state_record['pl_semantics'][i]
+
+            pl_pan = self.get_visualization_panoptic_simple(gt_labels, pl_masks, pl_semantics)
+            visPlPan = VisHelper.visPanoptic(pl_pan, visImage)
+            visPlBox = VisHelper.visBox(visPlPan, pl_bboxes)
+            #visResults.append(visPlPan)
+            visResults.append(visPlBox)
+
+            # semantic head
+            sem_head_pred = self.state_record['semantic_head_prediction'][i]
+            sem_head_tgt = self.state_record['semantic_head_label'][i]
+            visResults.append(VisHelper.visSemantic(
+                self.get_visualization_semantic(sem_head_pred)))
+            #visResults.append(VisHelper.visSemantic(
+            #    self.get_visualization_semantic(sem_head_pred)))
+
+            # embedding head
+            em_head_pred = self.state_record['embedding_head_prediction'][i]
+            visEm = self.get_visualization_feature(em_head_pred)
+            visEm = VisHelper.visImage(visEm)
+            visResults.append(visEm)
+
+            # prediction: panoptic
+            pos_inds = self.state_record['pred_thing_pos_inds'][i]
+            th_masks = all_th_masks_list[i]
+            th_cls = self.state_record['pred_thing_cls'][i][pos_inds].sigmoid()
+
+            st_masks = self.state_record['pred_stuff_masks'][i]
+            st_cls = self.state_record['pred_stuff_cls'][i].sigmoid()
+
+            pred_pan, _ = self.get_visualization_panoptic(th_cls, th_masks, st_cls, st_masks)
+            visPredPan = VisHelper.visPanoptic(pred_pan, visImage)
+
+            # prediction: bbox
+            pred_bboxes = self.state_record['pred_thing_bboxes'][i][pos_inds]
+            pred_bboxes = bbox_cxcywh_to_xyxy(pred_bboxes.clone())
+            h, w = pred_pan.shape
+            pred_bboxes[:, 0::2] = (pred_bboxes[:, 0::2] * w).clip(min=0, max=w)
+            pred_bboxes[:, 1::2] = (pred_bboxes[:, 1::2] * h).clip(min=0, max=h)
+            visPredBox = VisHelper.visBox(visPredPan, pred_bboxes)
+
+            #visResults.append(visPredPan)
+            visResults.append(visPredBox)
+
+            # Collect all results
+            all_results.append(VisHelper.hstack(visResults))
+
+        return VisHelper.vstack(all_results)

@@ -121,6 +121,7 @@ lr_config = dict(policy='step', step=[15])
 runner = dict(type='EpochBasedRunner', max_epochs=20)
 
 #custom_hooks = [dict(type='VisualizationHook', priority='LOWEST', interval=50)]
+custom_hooks = [dict(type='SimpleVisHook', priority='LOWEST', interval=50)]
 custom_imports = dict(
     imports=["datasets", "models"],
     allow_failed_imports=False)

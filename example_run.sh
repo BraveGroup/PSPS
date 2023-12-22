@@ -28,4 +28,7 @@
 #./tools/dist_train.sh ./configs/models/r50_voc_wsup_v2.py 8 --work-dir ./work_dir/voc_wsup_v2
 
 # semantic head no self-attn, 442
-./tools/dist_train.sh ./configs/models/r50_voc_wsup.py 8 --work-dir ./work_dir/voc_wsup_442
+#./tools/dist_train.sh ./configs/models/r50_voc_wsup.py 8 --work-dir ./work_dir/voc_wsup_442
+
+#PYTHONPATH='./' python ./tools/train.py ./configs/models/r50_voc_wsup.py --work-dir ./work_dir/voc_wsup_debug
+./tools/dist_train.sh ./configs/models/r50_voc_wsup.py 8 --work-dir ./work_dir/voc_wsup_debug

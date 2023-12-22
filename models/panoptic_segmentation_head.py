@@ -221,6 +221,13 @@ class PanopticSegmentationHead(MaskDETRHead):
 
         # to make pytorch happy with unused parameters
         losses['loss_dummy'] = thing_query_list[-1].sum() * 0
+
+        self.state_record.update({
+            'pred_thing_masks': thing_masks[-1],
+            'pred_thing_pos_inds': pos_inds_list,
+            'pred_thing_cls': cls_scores_list,
+            'pred_thing_bboxes': bbox_preds_list
+        })
         return losses, num_total_pos
 
     def loss_stuff_masks(self,
@@ -284,6 +291,10 @@ class PanopticSegmentationHead(MaskDETRHead):
                                      avg_factor=num_total_pos)
             losses[f'd{i}.loss_stuff_cls'] = loss_cls * 2
 
+        self.state_record.update({
+            'pred_stuff_masks': stuff_masks[-1].unflatten(0, (bs, -1)),
+            'pred_stuff_cls': stuff_clses[-1].view(bs, -1)
+        })
         return losses, num_total_pos
 
     @force_fp32(apply_to=('x',))

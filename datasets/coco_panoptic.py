@@ -21,13 +21,13 @@ import multiprocessing as mp
 import PIL.Image as Image
 
 
-__all__ = ["COCOPanopticDataset"]
+__all__ = ["COCOPanopticDataset", 'COCO_META_INFO']
 
 
 INSTANCE_OFFSET = 1000 
 
 
-_id_and_category_maps =[
+COCO_META_INFO =[
     { "supercategory": "person",
         "color": [
             220, 20, 60 ],
@@ -1520,9 +1520,9 @@ class COCOPanoptic(COCO):
 
         if 'categories' in self.dataset:
             for i, cat in enumerate(self.dataset['categories']):
-                assert cat['id'] == _id_and_category_maps[i]['id'], (cat, _id_and_category_maps[i])
-                assert cat['name'] == _id_and_category_maps[i]['name'], (cat, _id_and_category_maps[i])
-                cat['color'] = _id_and_category_maps[i]['color']
+                assert cat['id'] == COCO_META_INFO[i]['id'], (cat, COCO_META_INFO[i])
+                assert cat['name'] == COCO_META_INFO[i]['name'], (cat, COCO_META_INFO[i])
+                cat['color'] = COCO_META_INFO[i]['color']
                 cats[cat['id']] = cat
 
         if 'annotations' in self.dataset and 'categories' in self.dataset:
